@@ -1,0 +1,563 @@
+---
+title: "Proyecto 3 final"
+output: github_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+## Librerias
+```{r}
+library(psych)
+library(dplyr)
+library(stringr)
+library(datasets.load)
+library(tidyverse)
+library(tm)
+library(tidytext)
+library(quanteda)
+library(quanteda.textstats)
+library(ggplot2)
+library(wordcloud)
+library(lubridate)
+library(readxl)
+library(chron)
+library(factoextra)
+library(flexclust)
+library(cluster)
+#library(ggdendro)
+library(factoextra)
+library(knitr)
+library(mclust)
+library(dbscan)
+library(e1071)
+library(olsrr)
+library(pROC)
+library(class)
+library(discrim)
+library(tidymodels)
+library(naivebayes)
+library(kknn)
+library(patchwork)
+library(caret)
+library(yardstick)
+```
+
+
+##Cargando datos
+
+```{r}
+#endurance <- `endurance (1)`
+```
+
+##leemos un archivo 
+```{r}
+setwd("C:/Users/Dieca/OneDrive/Escritorio/p3 final")
+endurance <- read.csv("endurance.csv", sep = ",")
+endurance <- endurance %>% select(- c(X))
+summary(endurance)
+glimpse(endurance)
+
+```
+
+
+
+##Pasamos los atributos a forma numerica
+
+```{r}
+endurance$elev_low <- as.numeric(endurance$elev_low)
+endurance$elev_high <- as.numeric(endurance$elev_high )
+endurance$max_speed <- as.numeric(endurance$max_speed)
+endurance$average_speed <- as.numeric(endurance$average_speed )
+
+#endurance$calories <- as.double(endurance$calories)
+#endurance$distance <- as.double(endurance$distance)
+#endurance$elev_low <- as.double(endurance$elev_low)
+#endurance$elev_high <- as.double(endurance$elev_high )
+#endurance$max_speed <- as.double(endurance$max_speed)
+#endurance$average_speed <- as.double(endurance$average_speed )
+#endurance$total_elevation_gain <- as.double(endurance$total_elevation_gain)
+#endurance$moving_time <- as.double(endurance$moving_time)
+#endurance$elapsed_time <- as.double(endurance$elapsed_time)
+
+```
+
+
+##Comprobamos datos NA y cambiamos tipo de data. 
+
+```{r}
+endurance %>% 
+  summarise_all(funs(sum(is.na(.))))
+str(endurance)
+
+
+# Para las observaciones que tengan datos faltantes, le asignamos el valor NA para eliminarlos en el siguiente paso
+#endurance[endurance == ""] <- NA
+
+endurance_pre<- endurance %>% 
+  filter(!(is.na(elev_low)|is.na(elev_high)|is.na(device_name)))
+endurance_pre %>% 
+  summarise_all(funs(sum(is.na(.))))
+summary(endurance_pre)
+```
+A partir de una analisis exploratoria de datos limpiaremos la data con tal de no ensuciar nuestro modelo de clasificacion a futuro. 
+Para esto eliminaremos aquellos datos donde el max_speed, moving_time, distance y calories tengan valor 0, ya que a fin de cuentas no son valores representativos para un modelo de Clasificacion.
+
+
+```{r}
+endurance_pre <- endurance_pre[endurance_pre$calories != 0,]
+endurance_pre <- endurance_pre[endurance_pre$moving_time != 0,]
+endurance_pre <- endurance_pre[endurance_pre$distance != 0,]
+endurance_pre <- endurance_pre[endurance_pre$max_speed != 0,]
+
+summary(endurance_pre)
+
+```
+
+
+##MOdelo de regresion lineal previo para ver datos atipicos en distancia 
+```{r}
+
+endurance_pre$type <- as.factor(endurance_pre$type)
+ggplot(endurance_pre, aes(type,distance)) + 
+  geom_point()
+
+```
+Con este modelo de regresion lineal podemos ver aquellos datos atipicos que se alejan demaciado de la media. 
+por ejemplo en Ride eliminaremos todas aquellas distincias que superan los 500000 para no ensuciar nuestra prediccion a futuro. 
+1479320
+1478170
+1319550
+1043360
+924814
+686231
+686231
+657326
+654208
+615937
+520048
+Son todos aquellos datos que excluimos de la data
+
+```{r}
+endurance_pre <- endurance_pre %>% filter(distance < 500000)
+
+ggplot(endurance_pre, aes(type,distance)) + 
+  geom_point() +
+  geom_smooth(method = "lm")
+```
+
+##MOdelo de regresion lineal previo de maxima velocidad
+```{r}
+ggplot(endurance_pre, aes(type,max_speed)) + 
+  geom_point()
+```
+Es raro ver datos de velocidad mayores a 100km/hr en bicicletas, incluso en bici electrica. 
+Tmabien vemos Velocidades en Run superiores a los 50 y en caminatas.
+
+Un ciclista promedio alcanza los 29 km/Hr Y un profesional unos 42 km/Hr
+para que se alcancen velocidades superiores a esta se debe estar realizando descenso. 
+
+Considerando que el maximo de esta data es de 244 km/hr y hay pocos casos superiores a los 80 km/hr
+excluiremos los datos atipicos mayores a 80  km/hr
+244.600
+167.800
+152.900
+140.600
+135.600
+117.900
+96.700
+95.700
+91.800
+88.100
+83.000
+82.400
+82.000
+81.900
+Son todos aquellos datos que excluimos de la data
+
+```{r}
+endurance_pre <- endurance_pre %>% filter(max_speed < 80)
+
+ggplot(endurance_pre, aes(type,max_speed)) + 
+  geom_point() +
+  geom_smooth(method = "lm")
+
+```
+
+ahora con moving time
+```{r}
+ggplot(endurance_pre, aes(type,moving_time)) + 
+  geom_point()
+
+```
+11025474
+3156689
+909135
+608912
+514043
+350178
+Son todos aquellos datos que excluimos de la data
+
+excluir datos de moving time, aquellos que son mayores que 348964, ya que la data empieza a ser representativa a partir de este numero. 
+```{r}
+endurance_pre <- endurance_pre %>% filter(moving_time < 348964)
+
+ggplot(endurance_pre, aes(type,moving_time)) + 
+  geom_point() +
+  geom_smooth(method = "lm")
+
+```
+
+##MOdelo de regresion lineal previo para ver datos atipicos en elev_high 
+```{r}
+ggplot(endurance_pre, aes(type,elev_high)) + 
+  geom_point()
+
+```
+Por lo visto son valores normales. 
+
+##MOdelo de regresion lineal previo para ver datos atipicos en elev_low 
+```{r}
+ggplot(endurance_pre, aes(type,elev_low)) + 
+  geom_point()
+
+```
+Por lo visto son valores normales. 
+
+
+elapsed_time
+```{r}
+ggplot(endurance_pre, aes(type,elapsed_time)) + 
+  geom_point()
+
+```
+Llaman la antencion estos valores, pero no los eliminaremos. 
+511111044
+509024893
+388497176
+387979240
+377464622
+247658308
+exluir datos de elapsed_time
+
+average_speed
+```{r}
+ggplot(endurance_pre, aes(type,average_speed)) + 
+  geom_point()
+
+```
+
+Llaman la atencion estos datos, lo eliminaremos porque puden ensuciar nuestro modelo de prediccion. 
+2296.088
+866.710
+792.677
+362.215
+360.120
+274.200
+217.417
+209.600
+208.557
+179.900
+177.163
+161.312
+159.302
+155.800
+
+
+exluir datos de average_speed que son mayor a 150 
+```{r}
+endurance_pre <- endurance_pre %>% filter(average_speed < 150)
+
+ggplot(endurance_pre, aes(type,average_speed)) + 
+  geom_point() +
+  geom_smooth(method = "lm")
+```
+
+
+
+#Sepamos los atributos especiales
+atributos["distance" , "elev_low", "elev_high", "max_speed", "moving_time", "elapsed_time", "average_speed","total_elevation_gain"]
+```{r}
+atributos_num <- c("type","calories","distance" , "elev_low", "elev_high", "max_speed", "moving_time", "elapsed_time", "average_speed","total_elevation_gain")
+
+
+endurance_num <- endurance_pre %>% 
+  select(atributos_num)
+unique(endurance_num$type)
+
+```
+
+```{r}
+endurance_num$type <- as.factor(endurance_num$type)
+```
+
+Pasamos la variable type a factor para poder hacer los estudios correspondientes
+
+Utilizamos el modelo logístico Multivariable para ver la representatividad estadística de cada variable.
+
+```{r}
+endurance_num$prob <- NULL
+
+modelo_logistico_multi <- glm(type ~ ., endurance_num, family = "binomial")
+summary(modelo_logistico_multi)
+```
+Podemos ver que Colories, eleve_low , average_speed, max_speed, distance y moving time son variables representativas del modelo. 
+
+```{r}
+endurance_num$prob_multi <- predict(modelo_logistico_multi, type=c("response"))
+
+auc(roc(type ~ prob_multi, data = endurance_num))
+```
+Al incluir todas las variables vemos que algunas de ellas tienen significancia estadística, pero otras no, por lo que deberían ser descartadas en el modelo.
+Estos resultados pueden darse debido a sobre entrenamiento del modelo, por lo que haremos la prueba con un conjunto de entrenamiento y un conjunto de prueba.
+
+```{r}
+set.seed(42)
+sample <- sample(1:nrow(endurance_num), .8*10000)
+
+endurance_num_train <- endurance_num[sample,]
+endurance_num_test <- endurance_num[-sample,]
+modelo_logistico_multi <- glm(type ~ calories + distance + elev_low + max_speed + total_elevation_gain + elev_high + moving_time, endurance_num_train, family = "binomial")
+summary(modelo_logistico_multi)
+```
+
+```{r}
+endurance_num_test$prob_multi <- predict(modelo_logistico_multi, endurance_num_test, type=c("response"))
+
+auc(roc(type ~ prob_multi, data = endurance_num_test))
+
+```
+Vemos que el AUC SUBIO un poco de 69.72%, a 76.11% pero sigue siendo un excelente resultado. Debido a que el porcentaje varia super poco y sigue siendo representativo evaluaremos las variables que no son tan representativas según el modelo de todas maneras.    
+----------------------------------------------------------------------------------------------------------------
+
+
+##MODELAMIENTO PARAMETRICO. 
+
+##Naive Bayes 
+
+```{r}
+modeloNB <- naiveBayes(type ~ ., data = endurance_num_train)
+pred <- predict(modeloNB, endurance_num_test, type ="raw")
+modeloNB
+```
+
+
+Calculamos el AUC para evaluar la capacidad del modelo de predecir. Este índice varía entre 0.5 y 1, donde 1 es mejor.
+
+```{r}
+endurance_num_test$prob <- pred[,2]
+
+curva_roc <- roc(type ~ prob, data = endurance_num_test)
+plot(curva_roc) 
+auc(curva_roc)
+```
+Area under the curve: 0.9229, 
+
+
+Calcularemos el modelo knn mas adelante...
+
+
+
+##arboles de decision 
+
+Como opción principal, realizaremos un modelo con todas las actividades incluidas (Run, Walk, Hike,Ride y EbikeRide),luego de esto, nos daremos cuenta si el modelo resulta representativo (alto porcentaje) para posteriormente realizar el modelo predictivo.
+
+```{r}
+a_pie_bici <- select(endurance_pre,"type","calories","distance" , "elev_low", "elev_high", "max_speed", "moving_time", "average_speed","total_elevation_gain" )
+a_pie_bici <- filter(a_pie_bici, type %in% c("Run", "Walk", "Hike","Ride", "EBikeRide"))
+```
+
+Para realizar un modelo multi_roc pararemos todas las actividades a un número para poder realizar el estudio.
+Ride--> 1
+Run --> 2
+Walk --> 3
+Hike --> 4
+EbikeRide --> 5
+```{r}
+a_pie_bici$type <- as.character(a_pie_bici$type)
+a_pie_bici$type[a_pie_bici$type == "Ride"] <- "1"
+a_pie_bici$type[a_pie_bici$type == "Run"] <- "2"
+a_pie_bici$type[a_pie_bici$type == "Walk"] <- "3"
+a_pie_bici$type[a_pie_bici$type == "Hike"] <- "4"
+a_pie_bici$type[a_pie_bici$type == "EBikeRide"] <- "5"
+```
+
+
+
+
+modelo predcitivo pero con todas las variables en estudio. 
+
+```{r}
+a_pie_bici$type <- as.factor(a_pie_bici$type)
+```
+
+Seperamos data en train y test...
+```{r}
+data_split_a_pie_bici <- initial_split(a_pie_bici, prop = 3/4)
+
+# Create data frames for the two sets:
+train_data_a_pie_bici <- training(data_split_a_pie_bici)
+test_data_a_pie_bici  <- testing(data_split_a_pie_bici)
+
+nrow(test_data_a_pie_bici)
+#train_data %>% nrow()
+
+```
+
+receta tipo type_pie_bici
+```{r}
+#train_data_a_pie <- train_data_a_pie %>% select(- c(is_Run))
+#test_data_a_pie <- train_data_a_pie %>% select(- c(is_Run))
+receta_type_pie_bici <- 
+  recipe(type ~ ., data = train_data_a_pie_bici) 
+
+receta_type_pie_bici
+```
+```{r}
+train_data_a_pie_bici$type <- as.factor(train_data_a_pie_bici$type)
+
+test_data_a_pie_bici$type <- as.factor(test_data_a_pie_bici$type)
+
+```
+
+```{r}
+modelo <-
+  decision_tree(tree_depth = 5, min_n = 10) %>% 
+  set_engine("rpart") %>% 
+  set_mode("classification")
+
+modelo
+
+```
+
+Ahora hacemos el fit del modelo, calculamos sus predicciones y calculamos el valor de AUC
+
+```{r}
+
+fitea_pie_bici <- function(mod){
+  
+  modelo_fit_is_pie_bici <- 
+  workflow() %>% 
+  add_model(modelo) %>% 
+  add_recipe(receta_type_pie_bici) %>% 
+  fit(data = train_data_a_pie_bici)
+
+model_pred_is_pie_bici <- 
+  predict(modelo_fit_is_pie_bici, test_data_a_pie_bici, type = "class") %>% 
+  bind_cols(test_data_a_pie_bici) 
+
+return (multiclass.roc(model_pred_is_pie_bici$type %>% as.integer(), model_pred_is_pie_bici$.pred_class %>% as.integer()))
+}
+
+fitea_pie_bici(modelo)
+```
+Se ve un mejoramiento en el valor estimado de 0.74, esto quire decir que el modelo si es representativo estadisticamente.  
+
+Ahora veremos la magia de tidymodels, haremos una comparación con otros modelos, como el modelo de regresión logística, naive bayes o Knn. Para esto, lo único que debemos cambiar es el modelo, ya que la receta es la misma, y el flujo de validación también es el mismo. Por lo tanto, podemos utilizar la función que creamos más arriba para evaluar los diferentes modelos y compararlos.
+#roc_auc(truth = type, .pred_EBikeRide, .pred_Hike, .pred_Ride, .pred_Run, .pred_Walk))
+
+##MODELO LOGISTICO PARA TODOAS LAS ACTIVIDADES EN ESTUDIO. 
+```{r}
+modelo_rl <- 
+  logistic_reg() %>% 
+  set_engine("glm")
+
+fitea_pie_bici(modelo_rl)
+```
+##MODELO NAIVE BAYES PARA TODOAS LAS ACTIVIDADES EN ESTUDIO. 
+```{r}
+modelo_nb <-
+  naive_Bayes(smoothness = .8) %>%
+  set_engine("naivebayes")
+
+fitea_pie_bici(modelo_nb)
+```
+##MODELO KNN PARA TODOAS LAS ACTIVIDADES EN ESTUDIO. 
+```{r}
+modelo_knn <-
+  nearest_neighbor(neighbors = 5) %>% 
+  set_engine("kknn") %>% 
+  set_mode("classification")
+
+fitea_pie_bici(modelo_knn)
+```
+Ya que todos los modelos no arrojan el mismo resultado, calcularemos la curva roc en modelo_pred_is_pie_bici, probando cada uno de los modelos visto anteriormente (Logistico, naive bayes y Knn).
+```{r}
+modelo_fit_is_pie_bici <- 
+  workflow() %>% 
+  add_model(modelo_knn) %>% 
+  add_recipe(receta_type_pie_bici) %>% 
+  fit(data = train_data_a_pie_bici)
+
+model_pred_is_pie_bici <- 
+  predict(modelo_fit_is_pie_bici, test_data_a_pie_bici, type = "class") %>% 
+  bind_cols(test_data_a_pie_bici) 
+```
+
+```{r}
+curva_roc1 <- multiclass.roc(model_pred_is_pie_bici$type %>% as.integer(), model_pred_is_pie_bici$.pred_class %>% as.integer())
+auc(curva_roc1)
+```
+
+```{r}
+modelo_fit_is_pie_bici <- 
+  workflow() %>% 
+  add_model(modelo_rl) %>% 
+  add_recipe(receta_type_pie_bici) %>% 
+  fit(data = train_data_a_pie_bici)
+
+model_pred_is_pie_bici <- 
+  predict(modelo_fit_is_pie_bici, test_data_a_pie_bici, type = "class") %>% 
+  bind_cols(test_data_a_pie_bici) 
+```
+
+```{r}
+curva_roc1 <- multiclass.roc(model_pred_is_pie_bici$type %>% as.integer(), model_pred_is_pie_bici$.pred_class %>% as.integer())
+#plot(curva_roc1) 
+auc(curva_roc1)
+```
+
+```{r}
+modelo_fit_is_pie_bici <- 
+  workflow() %>% 
+  add_model(modelo_nb) %>% 
+  add_recipe(receta_type_pie_bici) %>% 
+  fit(data = train_data_a_pie_bici)
+
+model_pred_is_pie_bici <- 
+  predict(modelo_fit_is_pie_bici, test_data_a_pie_bici, type = "class") %>% 
+  bind_cols(test_data_a_pie_bici) 
+```
+
+```{r}
+curva_roc1 <- multiclass.roc(model_pred_is_pie_bici$type %>% as.integer(), model_pred_is_pie_bici$.pred_class %>% as.integer())
+#plot(curva_roc1) 
+auc(curva_roc1)
+```
+
+
+
+
+Nos quedaremos con el Modelo Naive bayes, ya que es el modelo más representativo de todos, presento un área bajo la curva mayor al resto de los modelos, específicamente de 83.84%
+
+
+
+##Matriz de confusión 
+Ahora podemos ver los datos que fueron etiquetados correctamente y aquellos que fueron clasificados de manera errónea.
+
+```{r}
+model_pred_is_pie_bici %>% conf_mat(type, .pred_class) %>% autoplot(type = "heatmap")
+confusionMatrix(model_pred_is_pie_bici$type, model_pred_is_pie_bici$.pred_class)
+```
+Ride--> 1
+Run --> 2
+Walk --> 3
+Hike --> 4
+EbikeRide --> 5
+
+Por ejemplo, Segun este modelo 20555 casos de las actividad Ride fueron bien clasificados, 9871 casos en Run fueron bien clasificados. Por otro lado, 738 casos de la actividad  Ride fueron clasificados como Run.
+
+Es decir un total de 31033 datos fueron bien clasificados
+y 3991 datos fueron mal clasificados. 
+
+
